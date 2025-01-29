@@ -164,6 +164,7 @@ public struct CashBarcode {
 public enum PTErrorCode: String {
     case actionComplete
     case actionInProgress
+    case applePayError
     case attestationFailed
     case inProgress
     case invalidAPIKey
@@ -204,3 +205,72 @@ public struct PTError: Error, Equatable {
         return false
     }
 }
+
+/// Represents a service fee model in the PayTheory system.
+public struct ServiceFeeModel: Decodable {
+    /// The basis points for the fee calculation
+    public var basisPoints: Int
+    /// The fixed fee amount
+    public var fixed: Int
+    /// The minimum fee amount
+    public var minFee: Int
+    
+    enum CodingKeys: String, CodingKey {
+        case basisPoints = "basis_points"
+        case fixed
+        case minFee = "min_fee"
+    }
+}
+
+/// Represents a host token response from the PayTheory system.
+public struct HostTokenResponse {
+    /// The host token for the transaction
+    public var hostToken: String
+    /// The merchant unique identifier
+    public var merchantUid: String
+    /// The public key for encryption
+    public var publicKey: String
+    /// The session key for the transaction
+    public var sessionKey: String
+    /// The service fee model for debit transactions
+    public var debitServiceFeeModel: ServiceFeeModel
+    /// The service fee model for credit transactions
+    public var creditServiceFeeModel: ServiceFeeModel
+    /// The currency code
+    public var currency: String
+    /// The country code
+    public var country: String
+    
+    /// Initializes a new instance of `HostTokenResponse` from a response dictionary.
+    /// - Parameter response: A dictionary containing the host token response details.
+    init(response: [String: Any]) {
+        self.hostToken = response["hostToken"] as? String ?? ""
+        self.merchantUid = response["merchantUid"] as? String ?? ""
+        self.publicKey = response["publicKey"] as? String ?? ""
+        self.sessionKey = response["sessionKey"] as? String ?? ""
+        
+        if let debitModel = response["debit_service_fee_model"] as? [String: Any] {
+            self.debitServiceFeeModel = ServiceFeeModel(
+                basisPoints: debitModel["basis_points"] as? Int ?? 0,
+                fixed: debitModel["fixed"] as? Int ?? 0,
+                minFee: debitModel["min_fee"] as? Int ?? 0
+            )
+        } else {
+            self.debitServiceFeeModel = ServiceFeeModel(basisPoints: 0, fixed: 0, minFee: 0)
+        }
+        
+        if let creditModel = response["credit_service_fee_model"] as? [String: Any] {
+            self.creditServiceFeeModel = ServiceFeeModel(
+                basisPoints: creditModel["basis_points"] as? Int ?? 0,
+                fixed: creditModel["fixed"] as? Int ?? 0,
+                minFee: creditModel["min_fee"] as? Int ?? 0
+            )
+        } else {
+            self.creditServiceFeeModel = ServiceFeeModel(basisPoints: 0, fixed: 0, minFee: 0)
+        }
+        
+        self.currency = response["currency"] as? String ?? ""
+        self.country = response["country"] as? String ?? ""
+    }
+}
+

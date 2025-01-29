@@ -19,6 +19,7 @@ public enum PaymentType: String, CaseIterable, Identifiable {
     case card = "Card"
     case ach = "ACH"
     case cash = "Cash"
+    case applePay = "ApplePay"
     public var id: Self { self }
 }
 
@@ -39,6 +40,7 @@ let transferMessage = "host:transfer_part1"
 let tokenizeMessage = "host:tokenize"
 let barcodeMessage = "host:barcode"
 let calculateFeeMessage = "host:calculate_fee"
+let applePayTransaction = "host:apple_pay_transaction"
 
 // Constants for incoming message types
 let hostTokenResponseMessage = "host_token"
@@ -85,3 +87,5 @@ func ?? <T>(lhs: Binding<T?>, rhs: T) -> Binding<T> {
         set: { lhs.wrappedValue = $0 }
     )
 }
+
+// MARK: - 

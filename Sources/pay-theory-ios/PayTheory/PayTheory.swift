@@ -88,10 +88,16 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
     var isComplete = false
     var passedPayor: Payor?
     var ptToken: String?
+    var country: String?
+    var currency: String?
+    var creditCardFeeModel: ServiceFeeModel?
+    var debitCardFeeModel: ServiceFeeModel?
     var hostTokenTimestamp: Date?
     var session: WebSocketSession
     // Attestation string being set should trigger the connection of our socket or sending of the hostTokenMessage if it is already connected
     var attestationString: String?
+    var applePayHandler: PayTheoryApplePayHandler
+    
     
     // Setting of the cardBin should trigger the potential calculation of fees if an amount is set
     var cardBin: String? {
@@ -133,7 +139,7 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
     /// - Note: This initializer sets up various state variables and configures the instance
     ///         based on the provided API key. It also sets up Combine publishers to propagate
     ///         changes in the instance's state.
-    public init(amount: Int? = nil, apiKey: String, devMode: Bool = false, errorHandler: @escaping (PTError) -> Void) {
+    public init(amount: Int? = nil, apiKey: String, devMode: Bool = false,  errorHandler: @escaping (PTError) -> Void) {
         // Parse the API key to extract environment and stage information
         var apiParts = apiKey.split {$0 == "-"}.map { String($0) }
         // Validate the the API key is the correct format
@@ -174,6 +180,8 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
         // Initialize the WebSocketSession we will use for socket communications
         let provider = WebSocketProvider()
         session = WebSocketSession()
+        applePayHandler = PayTheoryApplePayHandler()
+        applePayHandler.setPayTheory(self)
         session.prepare(_provider: provider, _handler: self)
         
         // Set up Combine publishers to propagate changes

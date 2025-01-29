@@ -160,7 +160,8 @@ extension PayTheory {
                 "attestation": attestationString ?? "",
                 "timing": Date().millisecondsSince1970,
                 "appleEnvironment": appleEnvironment,
-                "require_attestation": self.stage == "paytheory" ? true : !devMode
+                "require_attestation": self.stage == "paytheory" ? true : !devMode,
+                "wallet_support": true
             ]
 
             guard let encodedData = stringify(jsonDictionary: hostToken).data(using: .utf8) else {
@@ -188,12 +189,16 @@ extension PayTheory {
             
             // Set the values from the response on the class variables they associate with
             let body = dictionary["body"] as? [String: AnyObject] ?? [:]
+            let hostTokenResponse = HostTokenResponse(response: body)
             DispatchQueue.main.async {
-                self.transaction.hostToken = body["hostToken"] as? String ?? ""
+                self.transaction.hostToken = hostTokenResponse.hostToken
             }
-            transaction.sessionKey = body["sessionKey"] as? String ?? ""
-            let key = body["publicKey"] as? String ?? ""
-            self.transaction.publicKey = convertStringToByte(string: key)
+            self.transaction.sessionKey = hostTokenResponse.sessionKey
+            self.transaction.publicKey = convertStringToByte(string: hostTokenResponse.publicKey)
+            self.country = hostTokenResponse.country
+            self.currency = hostTokenResponse.currency
+            self.creditCardFeeModel = hostTokenResponse.creditServiceFeeModel
+            self.debitCardFeeModel = hostTokenResponse.debitServiceFeeModel
             
             // Set isReady to true, set the timestamp for the host token, and calc fees if needed
             setReady(true)

@@ -163,6 +163,18 @@ class Transaction: ObservableObject {
         }
     }
     
+    /// Creates an encrypted body for an Apple Pay payment.
+    /// - Parameter applePayData: The Apple Pay payment data structure
+    /// - Returns: An encrypted JSON string representing the Apple Pay payment data, or nil if the host token is not set
+    func createApplePayBody(applePayData: ApplePayPaymentData) -> String? {
+        if let hostToken = hostToken {
+            let bodyString = convertToJSONString(applePayData)
+            return encryptBody(string: bodyString, action: applePayTransaction)
+        } else {
+            return nil
+        }
+    }
+    
     /// Resets the transaction state.
     ///
     /// This method clears all transaction-related data, preparing the instance for a new transaction.
