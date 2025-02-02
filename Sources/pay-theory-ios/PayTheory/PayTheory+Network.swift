@@ -120,15 +120,28 @@ extension PayTheory {
     /// Checks to see if the socket is connected
     /// Returns true if socket was already connected or false if it had to reconnect
     func ensureConnected() async throws -> Bool {
+        // Check if we're already connecting
+        guard !isConnecting else {
+            // Wait for any existing connection attempt to complete
+            while isConnecting {
+                try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            }
+            return session.status == .connected
+        }
+        
         // Check if the socket is already connected
         if session.status == .connected {
             return true
         }
+        
         // If not connected, try to reconnect
+        isConnecting = true
         do {
             try await connectSocket()
+            isConnecting = false
             return false
         } catch {
+            isConnecting = false
             throw error
         }
     }

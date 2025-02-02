@@ -32,6 +32,11 @@ public class WebSocketProvider: NSObject {
                      ptToken: String,
                      listener: WebSocketListener,
                      socketHandler: WebSocketProtocol) async throws {
+        // If we're already connecting or connected, don't try to connect again
+        guard status == .notConnected || status == .disconnected else {
+            return
+        }
+        
         return try await withCheckedThrowingContinuation { continuation in
             let urlSession = URLSession(configuration: .default, delegate: listener, delegateQueue: OperationQueue())
             let socketUrl = "wss://\(environment).secure.socket.\(stage).com/\(environment)/?pt_token=\(ptToken)"
@@ -39,14 +44,19 @@ public class WebSocketProvider: NSObject {
             webSocket = urlSession.webSocketTask(with: URL(string: socketUrl)!)
             status = .connecting
             
-            connectionCompletion = { result in
+            connectionCompletion = { [weak self] result in
+                guard self != nil else {
+                    continuation.resume(throwing: NSError(domain: "WebSocket", code: 0, userInfo: [NSLocalizedDescriptionKey: "WebSocket provider was deallocated"]))
+                    return
+                }
+                
                 switch result {
                 case .success:
                     continuation.resume()
                 case .failure(let error):
                     continuation.resume(throwing: error)
                 }
-                self.connectionCompletion = nil
+                self?.connectionCompletion = nil
             }
             
             self.webSocket!.resume()

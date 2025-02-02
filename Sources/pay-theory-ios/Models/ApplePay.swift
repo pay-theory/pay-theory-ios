@@ -65,6 +65,18 @@ public struct PTApplePaySheetConfig {
     }
 }
 
+public struct serviceFeeSummaryItemLabels {
+    public var serviceFee: String
+    public var total: String
+    public var subtotal: String
+    
+    public init(serviceFee: String = "Service Fee", total: String = "Total", subtotal: String = "Subtotal") {
+        self.serviceFee = serviceFee
+        self.total = total
+        self.subtotal = subtotal
+    }
+}
+
 /// Configuration options for Apple Pay payment sheet
 public struct PTApplePayRequestConfig {
     // Required
@@ -88,6 +100,7 @@ public struct PTApplePayRequestConfig {
     // Additional Options
     public var supportsCouponCode: Bool
     public var applicationData: Data?
+    public var serviceFeeSummaryItemLabels: serviceFeeSummaryItemLabels
     
     public init(
         merchantIdentifier: String,
@@ -101,7 +114,8 @@ public struct PTApplePayRequestConfig {
         shippingMethods: [PKShippingMethod]? = nil,
         shippingType: PKShippingType? = nil,
         supportsCouponCode: Bool = false,
-        applicationData: Data? = nil) {
+        applicationData: Data? = nil,
+        serviceFeeSummaryItemLabels: serviceFeeSummaryItemLabels = .init()) {
         self.merchantIdentifier = merchantIdentifier
         self.paymentSummaryItems = paymentSummaryItems
         self.supportedNetworks = supportedNetworks
@@ -114,6 +128,7 @@ public struct PTApplePayRequestConfig {
         self.shippingType = shippingType
         self.supportsCouponCode = supportsCouponCode
         self.applicationData = applicationData
+        self.serviceFeeSummaryItemLabels = serviceFeeSummaryItemLabels
     }
 }
 

@@ -80,7 +80,7 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
     var sessionId = generateUUID()
     @ObservedObject var transaction: Transaction
     var transactionCancellable: AnyCancellable? = nil
-    var errorHandler: (PTError) -> Void
+    public var errorHandler: (PTError) -> Void
     
     var appleEnvironment: String
     var devMode = false
@@ -97,7 +97,7 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
     // Attestation string being set should trigger the connection of our socket or sending of the hostTokenMessage if it is already connected
     var attestationString: String?
     var applePayHandler: PayTheoryApplePayHandler
-    
+    var isConnecting = false
     
     // Setting of the cardBin should trigger the potential calculation of fees if an amount is set
     var cardBin: String? {

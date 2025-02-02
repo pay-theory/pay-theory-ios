@@ -8,6 +8,13 @@
 import PassKit
 import SwiftUI
 
+/// PayTheory Apple Pay integration extension
+///
+/// This extension provides Apple Pay functionality for the PayTheory SDK, including:
+/// - Apple Pay availability checks
+/// - Apple Pay button creation
+/// - Payment request configuration
+/// - Payment processing
 @available(iOS 15.0, *)
 extension PayTheory {
     
@@ -28,11 +35,28 @@ extension PayTheory {
     
     // MARK: - Apple Pay Button
     
-    /// Creates an Apple Pay button view
+    /// Creates an Apple Pay button view with customizable appearance
+    ///
+    /// This method creates a SwiftUI view containing an Apple Pay button that will be:
+    /// - Styled according to the provided parameters
+    /// - Automatically disabled if:
+    ///   - Apple Pay is not available on the device
+    ///   - The Apple Pay sheet is not configured
+    ///   - The transaction host token is not set
+    /// - Animated when enabling/disabling
+    ///
     /// - Parameters:
     ///   - type: The type of button (default: .plain)
     ///   - style: The button style (default: .black)
-    /// - Returns: A SwiftUI view containing the Apple Pay button
+    /// - Returns: A SwiftUI view containing the configured Apple Pay button
+    ///
+    /// Example:
+    /// ```swift
+    /// payTheory.createApplePayButton(
+    ///     type: .buy,
+    ///     style: .white
+    /// )
+    /// ```
     public func createApplePayButton(
         type: PKPaymentButtonType = .plain,
         style: PKPaymentButtonStyle = .black
@@ -44,7 +68,11 @@ extension PayTheory {
                 self?.startApplePayPayment()
             }
         )
-        .disabled(self.transaction.hostToken == nil)
+        .disabled(
+            !canMakeApplePayments() || 
+            self.applePayHandler.sheetConfig == nil ||
+            self.transaction.hostToken == nil
+        )
         .animation(.default, value: self.transaction.hostToken != nil)
     }
     
@@ -68,71 +96,144 @@ extension PayTheory {
         }
     }
     
+    /// Configures the Apple Pay payment sheet with custom settings
+    ///
+    /// Use this method to set up the Apple Pay payment sheet before presenting it to the user.
+    /// The configuration includes settings for:
+    /// - Merchant identification
+    /// - Payment processing capabilities
+    /// - Required contact information
+    /// - Shipping options
+    /// - Line items and totals
+    /// - Custom handlers for payment events
+    ///
+    /// - Parameter config: A configuration object containing all settings for the Apple Pay sheet
+    ///
+    /// - Note: This must be called before attempting to present the Apple Pay sheet
+    ///
+    /// Example:
+    /// ```swift
+    /// let config = PTApplePaySheetConfig(
+    ///     merchantIdentifier: "merchant.com.example",
+    ///     supportedNetworks: [.visa, .masterCard],
+    ///     paymentSummaryItems: [
+    ///         PKPaymentSummaryItem(label: "Total", amount: 99.99)
+    ///     ]
+    /// )
+    /// payTheory.configureApplePaySheet(config)
+    /// ```
     public func configureApplePaySheet(_ config: PTApplePaySheetConfig) {
         applePayHandler.setConfig(config)
     }
     
     
-    /// Converts the configuration into a PKPaymentRequest
+    /// Creates and configures a PKPaymentRequest object from Pay Theory configuration
+    /// - Parameter ptRequestConfig: The Pay Theory configuration object containing Apple Pay settings
+    /// - Returns: A fully configured PKPaymentRequest ready for payment processing
+    /// - Note: This request object is used to initialize the Apple Pay payment sheet
     func createPaymentRequest(ptRequestConfig: PTApplePayRequestConfig) -> PKPaymentRequest {
         let request = PKPaymentRequest()
         
-        // Required fields
+        // Merchant identifier is required for Apple Pay processing
+        // This should match the identifier in your Apple Pay certificate
         request.merchantIdentifier = ptRequestConfig.merchantIdentifier
         
-        // Default country and currency codes
+        // Set regional settings with fallbacks to US/USD if not specified
+        // These determine the currency display and payment processing region
         request.countryCode = self.country ?? "US"
         request.currencyCode = self.currency ?? "USD"
         
-        // Payment configuration
+        // Configure supported payment methods and merchant capabilities
+        // - supportedNetworks: Available card networks (Visa, Mastercard, etc.)
+        // - merchantCapabilities: Payment processing capabilities (3DS, debit, credit)
         request.supportedNetworks = ptRequestConfig.supportedNetworks
         request.merchantCapabilities = ptRequestConfig.merchantCapabilities
         
-        // Contact fields
+        // Configure contact information requirements and defaults
+        // These determine what information is collected from the user
+        // and what fields are pre-filled if available
         request.requiredBillingContactFields = ptRequestConfig.requiredBillingContactFields
         request.requiredShippingContactFields = ptRequestConfig.requiredShippingContactFields
         request.billingContact = ptRequestConfig.billingContact
         request.shippingContact = ptRequestConfig.shippingContact
         
-        // Shipping configuration
+        // Configure shipping options and type
+        // - shippingMethods: Available shipping options with prices
+        // - shippingType: Delivery method (shipping, delivery, store pickup, etc.)
         request.shippingMethods = ptRequestConfig.shippingMethods
         if let shippingType = ptRequestConfig.shippingType {
             request.shippingType = shippingType
         }
         
-        // Additional options
+        // Set additional payment sheet features
+        // - supportsCouponCode: Enables/disables coupon entry field
+        // - applicationData: Custom data to pass through the payment
         request.supportsCouponCode = ptRequestConfig.supportsCouponCode
         request.applicationData = ptRequestConfig.applicationData
         
-        // Payment summary items
+        // Configure the payment summary items
+        // These determine what the user sees in the payment breakdown
+        // Including line items, tax, shipping, and total
         request.paymentSummaryItems = ptRequestConfig.paymentSummaryItems
         
         return request
     }
     
-    
-    
+    func parseApplePayResponse(_ response: String) -> ApplePayResponse {
+        let response = parseResponse(response: response)
+        if case .failure(let error) = response {
+            return .error(error)
+        } else if case .success(let (type, parsedBody)) = response {
+            switch type {
+            case transferResponseMessage:
+                if parsedBody["state"] as? String ?? "" == "FAILURE" {
+                    resetTransaction()
+                    return .failure(FailedTransaction(response: parsedBody))
+                } else {
+                    setComplete(true)
+                    return .success(SuccessfulTransaction(response: parsedBody))
+                }
+            default:
+                return .error(PTError(code: .socketError, error: "Unknown response type: \(type)"))
+            }
+        }
+        resetTransaction()
+        return .error(PTError(code: .socketError, error: "Unknown response type."))
+    }
 }
 
-// Create a separate handler class for Apple Pay
+// MARK: - Apple Pay Delegate
+
+/// Handles Apple Pay payment authorization and delegate methods
+///
+/// This class manages the Apple Pay payment flow, including:
+/// - Payment authorization
+/// - Service fee calculations
+/// - Payment summary updates
+/// - Contact and shipping information handling
 @available(iOS 15.0, *)
 class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelegate {
     weak var payTheory: PayTheory?
     var sheetConfig: PTApplePaySheetConfig?
     var cardType: ApplePayCardType?
     
+    /// Sets the configuration for the Apple Pay sheet
+    /// - Parameter config: Configuration object containing Apple Pay settings
     func setConfig(_ config: PTApplePaySheetConfig) {
         self.sheetConfig = config
     }
     
+    /// Sets the PayTheory instance reference
+    /// - Parameter payTheory: The PayTheory instance to handle payments
     func setPayTheory(_ payTheory: PayTheory) {
         self.payTheory = payTheory
     }
 
+    /// Calculates the service fee based on the payment amount and card type
+    /// - Parameter amount: The payment amount in decimal format
+    /// - Returns: The calculated service fee amount
     func calculateServiceFee(amount: Decimal) -> Decimal {
         guard let payTheory = payTheory else { return 0 }
-        print("Calculating service fee...")
-        print("card type: \(String(describing: cardType))")
         // Determine which fee model to use based on card type
         let feeModel = cardType == .debit ? 
         payTheory.debitCardFeeModel :
@@ -153,11 +254,17 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
         return totalFee
     }
     
+    /// Updates payment summary items with calculated service fees
+    /// - Parameter paymentSummaryItems: Array of payment summary items to update
+    /// - Note: This method modifies the items array in place, adding or updating service fee items
     func updatepaymentSummaryItemsWithServiceFee(_ paymentSummaryItems: inout [PKPaymentSummaryItem]) {
         guard let payTheory = payTheory else { return }
+        guard let sheetConfig = sheetConfig else { return }
+        // Pull out the labels object to use when searching and creating new payment summary items
+        var labels = sheetConfig.requestConfiguration.serviceFeeSummaryItemLabels
         
         // Look through the paymentSummaryItems. If you find one with Service Fee delete it and also remove that amount from the last items amount
-        if let serviceFeeIndex = paymentSummaryItems.firstIndex(where: { $0.label == "Service Fee" }) {
+        if let serviceFeeIndex = paymentSummaryItems.firstIndex(where: { $0.label == labels.serviceFee }) {
             let serviceFeeAmount = (paymentSummaryItems[serviceFeeIndex].amount as NSDecimalNumber).decimalValue
             paymentSummaryItems.remove(at: serviceFeeIndex)
             // Adjust the total amount by removing the service fee
@@ -173,24 +280,20 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
             let total = amount + fee
             
             paymentSummaryItems = [
-                PKPaymentSummaryItem(label: "Amount", amount: NSDecimalNumber(decimal: amount)),
-                PKPaymentSummaryItem(label: "Service Fee", amount: NSDecimalNumber(decimal: fee)),
-                PKPaymentSummaryItem(label: "Paddy's Pub", amount: NSDecimalNumber(decimal: total))
+                PKPaymentSummaryItem(label: labels.subtotal, amount: NSDecimalNumber(decimal: amount)),
+                PKPaymentSummaryItem(label: labels.serviceFee, amount: NSDecimalNumber(decimal: fee)),
+                PKPaymentSummaryItem(label: labels.total, amount: NSDecimalNumber(decimal: total))
             ]
         } else {
             let total = (paymentSummaryItems.last?.amount as NSDecimalNumber?)?.decimalValue ?? 0
             let sum = paymentSummaryItems.dropLast().reduce(Decimal(0)) { $0 + ($1.amount as NSDecimalNumber).decimalValue }
-            print(sum == total, "Same total: \(sum) != \(total)")
-            for item in paymentSummaryItems {
-                print(item.label ?? "No label", item.amount ?? 0)
-            }
             if total != sum {
                 // TODO: Close the sheet
                 return
             }
             
             let fee = calculateServiceFee(amount: sum)
-            let serviceFeeItem = PKPaymentSummaryItem(label: "Service Fee", amount: NSDecimalNumber(decimal: fee))
+            let serviceFeeItem = PKPaymentSummaryItem(label: labels.serviceFee, amount: NSDecimalNumber(decimal: fee))
             paymentSummaryItems.insert(serviceFeeItem, at: paymentSummaryItems.count - 1)
             paymentSummaryItems[paymentSummaryItems.count - 1].amount = NSDecimalNumber(decimal: total + fee)
         }
@@ -199,26 +302,31 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
     }
     
     
-    public func paymentAuthorizationController(_ controller: PKPaymentAuthorizationController,
-                                             didAuthorizePayment payment: PKPayment,
-                                             handler completion: @escaping (PKPaymentAuthorizationResult) -> Void) {
+    /// Handles the payment authorization process after user confirms payment with Apple Pay
+    /// - Parameters:
+    ///   - controller: The payment authorization controller managing the Apple Pay sheet
+    ///   - payment: Contains payment token, billing, and shipping information
+    ///   - completion: Callback to inform Apple Pay of the payment result
+    func paymentAuthorizationController(
+        _ controller: PKPaymentAuthorizationController,
+        didAuthorizePayment payment: PKPayment,
+        handler completion: @escaping (PKPaymentAuthorizationResult) -> Void
+    ) {
+        // Validate PayTheory instance exists before proceeding
         guard let payTheory = payTheory else {
             completion(PKPaymentAuthorizationResult(status: .failure, errors: nil))
             return
         }
         
         Task {
-            // Convert payment token data to base64 string for transmission
+            // SECTION 1: Extract Payment Data
+            // Convert Apple Pay token data into required format
             let paymentData = payment.token.paymentData
-            if let string = String(data: paymentData, encoding: .utf8) {
-                print(string)
-            }
-            
-            // You can also access additional information if needed
             let network = payment.token.paymentMethod.network?.rawValue ?? ""
             let displayName = payment.token.paymentMethod.displayName ?? ""
             
-            // If you need billing contact info
+            // SECTION 2: Process Billing Information
+            // Extract billing contact details and create Address object
             let billingContact = payment.billingContact
             let billingAddress = Address(
                 line1: billingContact?.postalAddress?.street ?? "",
@@ -228,8 +336,18 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
                 region: billingContact?.postalAddress?.state ?? "",
                 postalCode: billingContact?.postalAddress?.postalCode ?? ""
             )
-            let billingPayor = Payor(firstName: billingContact?.name?.givenName, lastName: billingContact?.name?.familyName, email: billingContact?.emailAddress, phone: billingContact?.phoneNumber?.stringValue, personalAddress: billingAddress)
+            
+            // Create Payor object with billing contact information
+            let billingPayor = Payor(
+                firstName: billingContact?.name?.givenName,
+                lastName: billingContact?.name?.familyName,
+                email: billingContact?.emailAddress,
+                phone: billingContact?.phoneNumber?.stringValue,
+                personalAddress: billingAddress
+            )
 
+            // SECTION 3: Process Shipping Information
+            // Similar to billing, create Address and Payor objects for shipping
             let shippingContact = payment.shippingContact
             let shippingAddress = Address(
                 line1: shippingContact?.postalAddress?.street ?? "",
@@ -239,11 +357,17 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
                 region: shippingContact?.postalAddress?.state ?? "",
                 postalCode: shippingContact?.postalAddress?.postalCode ?? ""
             )
-            let shippingPayor = Payor(firstName: shippingContact?.name?.givenName, lastName: shippingContact?.name?.familyName, email: shippingContact?.emailAddress, phone: shippingContact?.phoneNumber?.stringValue, personalAddress: shippingAddress)
+            let shippingPayor = Payor(
+                firstName: shippingContact?.name?.givenName,
+                lastName: shippingContact?.name?.familyName,
+                email: shippingContact?.emailAddress,
+                phone: shippingContact?.phoneNumber?.stringValue,
+                personalAddress: shippingAddress
+            )
             
+            // SECTION 4: Create Payment Token
+            // Determine card type and create token details
             let cardType = ApplePayCardType(cardType: payment.token.paymentMethod.type)
-            
-            // Create token details
             let tokenDetails = ApplePayTokenDetails(
                 paymentData: paymentData.base64EncodedString(),
                 paymentNetwork: network,
@@ -253,7 +377,8 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
                 shippingDetails: shippingPayor
             )
             
-            // Create the payload using ApplePayPaymentData
+            // SECTION 5: Create Final Payment Payload
+            // Combine all information into final payment structure
             let payload = ApplePayPaymentData(
                 amount: payTheory.amount ?? 0,
                 fee: payTheory.cardServiceFee ?? 0,
@@ -262,22 +387,71 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
                 hostToken: self.payTheory?.transaction.hostToken ?? ""
             )
             
-            // Encrypt the payload and prepare for transmission
+            // SECTION 6: Token Validation
+            // Check if host token is valid, refresh if needed
+            do {
+                if payTheory.hostTokenStillValid() == false {
+                    try await payTheory.ensureConnected()
+                    try await payTheory.fetchToken()
+                    try await payTheory.sendHostTokenMessage(calcFees: false)
+                }
+            } catch {
+                payTheory.handleConnectionError(error, sendToErrorHandler: true)
+            }
+            
+            // SECTION 7: Payment Processing
             if let encryptedBody = payTheory.transaction.createApplePayBody(applePayData: payload) {
-                // Convert to Data and base64 encode
-                if let jsonData = encryptedBody.data(using: .utf8) {
+                // SECTION 7A: Full Payment Processing Flow
+                if let callback = payTheory.applePayHandler.sheetConfig?.onPaymentCompletion {
+                    do {
+                        // Ensure connection and process payment
+                        try await payTheory.ensureConnected()
+                        let response = try await payTheory.session.sendMessageAndWaitForResponse(messageBody: encryptedBody)
+                        print(response)
+                        let applePayResponse = try payTheory.parseApplePayResponse(response)
+                        callback(applePayResponse)
+                        
+                        // Complete Apple Pay sheet based on response
+                        if case .success(_) = applePayResponse {
+                            completion(PKPaymentAuthorizationResult(status: .success, errors: []))
+                        } else {
+                            completion(PKPaymentAuthorizationResult(status: .failure, errors: []))
+                        }
+                    } catch {
+                        // Handle payment processing errors
+                        payTheory.errorHandler(PTError(code: .applePayError, error: "Failed to process Apple Pay payment"))
+                        completion(PKPaymentAuthorizationResult(status: .failure, errors: []))
+                    }
+                } 
+                // SECTION 7B: Tokenization-Only Flow
+                else if let jsonData = encryptedBody.data(using: .utf8) {
+                    // Convert encrypted body to base64 for tokenization
                     let base64EncodedString = jsonData.base64EncodedString()
-                    // Use the base64EncodedString for your transaction
-                    print(base64EncodedString)
+                    if let callback = payTheory.applePayHandler.sheetConfig?.onPaymentTokenizationCompletion {
+                        let success = callback(base64EncodedString)
+                        completion(PKPaymentAuthorizationResult(
+                            status: success ? .success : .failure,
+                            errors: []
+                        ))
+                    } else {
+                        payTheory.handleError(error: PTError.init(code: .applePayError, error: "No completion handler set to process Apple Pay payment"))
+                        completion(PKPaymentAuthorizationResult(status: .failure, errors: []))
+                    }
+                } else {
+                    payTheory.handleError(error: PTError.init(code: .applePayError, error: "Error encrypting the Apple Pay payload for processing"))
+                    completion(PKPaymentAuthorizationResult(status: .failure, errors: []))
                 }
             }
         }
     }
     
-    public func paymentAuthorizationControllerDidFinish(_ controller: PKPaymentAuthorizationController) {
+    func paymentAuthorizationControllerDidFinish(_ controller: PKPaymentAuthorizationController) {
         controller.dismiss()
     }
     
+    /// Processes payment request updates, including service fee calculations
+    /// - Parameter update: The payment request update to process
+    /// - Returns: The processed payment request update
     func handlePaymentUpdate(_ update: PKPaymentRequestUpdate) -> PKPaymentRequestUpdate {
         if sheetConfig?.transactionDetails.feeMode == .serviceFee {
             if !update.paymentSummaryItems.isEmpty {
@@ -295,6 +469,12 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
         return update
     }
     
+    /// Handles coupon code changes in the Apple Pay sheet
+    /// - Parameters:
+    ///   - controller: The payment authorization controller
+    ///   - couponCode: The entered coupon code
+    ///   - completion: Callback to update the payment sheet with new totals
+    /// - Note: If no coupon handler is configured, completes with empty update
     func paymentAuthorizationController(
         _ controller: PKPaymentAuthorizationController,
         didChangeCouponCode couponCode: String,
@@ -309,6 +489,12 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
         }
     }
     
+    /// Handles shipping contact changes in the Apple Pay sheet
+    /// - Parameters:
+    ///   - controller: The payment authorization controller
+    ///   - contact: The selected shipping contact information
+    ///   - completion: Callback to update shipping options and totals
+    /// - Note: Updates shipping rates and totals based on new address if handler configured
     func paymentAuthorizationController(
         _ controller: PKPaymentAuthorizationController,
         didSelectShippingContact contact: PKContact,
@@ -323,19 +509,27 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
         }
     }
     
-    func paymentAuthorizationController(_ controller: PKPaymentAuthorizationController,
-                                        didSelectPaymentMethod paymentMethod: PKPaymentMethod,
-                                        handler completion: @escaping (PKPaymentRequestPaymentMethodUpdate) -> Void) {
-        // Set the card type before doing anything
+    /// Handles payment method selection changes in the Apple Pay sheet
+    /// - Parameters:
+    ///   - controller: The payment authorization controller
+    ///   - paymentMethod: The selected payment method (card type)
+    ///   - completion: Callback to update totals based on payment method
+    /// - Note: Updates service fees if applicable based on card type (credit/debit)
+    func paymentAuthorizationController(
+        _ controller: PKPaymentAuthorizationController,
+        didSelectPaymentMethod paymentMethod: PKPaymentMethod,
+        handler completion: @escaping (PKPaymentRequestPaymentMethodUpdate) -> Void
+    ) {
+        // Store the selected card type for fee calculations
         self.cardType = ApplePayCardType(cardType: paymentMethod.type)
 
         if let closure = sheetConfig?.onPaymentMethodUpdate {
-            // Calculate any service fees based on the new state
+            // Use custom handler if configured
             let update = closure(paymentMethod)
             handlePaymentUpdate(update)
             completion(update)
         } else {
-            // If the transaction is set up as serviceFee then we should
+            // Handle automatic service fee updates if enabled
             if sheetConfig?.transactionDetails.feeMode == .serviceFee {
                 var paymentSummeryItems: [PKPaymentSummaryItem] = sheetConfig!.requestConfiguration.paymentSummaryItems
                 updatepaymentSummaryItemsWithServiceFee(&paymentSummeryItems)
@@ -346,6 +540,12 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
         }
     }
 
+    /// Handles shipping method selection changes in the Apple Pay sheet
+    /// - Parameters:
+    ///   - controller: The payment authorization controller
+    ///   - shippingMethod: The selected shipping method
+    ///   - completion: Callback to update totals based on shipping method
+    /// - Note: Updates total amount with new shipping costs if handler configured
     func paymentAuthorizationController(
         _ controller: PKPaymentAuthorizationController,
         didSelectShippingMethod shippingMethod: PKShippingMethod,
@@ -362,11 +562,18 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
 }
 
 // MARK: - Apple Pay Button View
-
+/// A SwiftUI wrapper for the Apple Pay payment button
+///
+/// This view creates and manages a native PKPaymentButton with customizable appearance and behavior
 @available(iOS 15.0, *)
 private struct PayTheoryApplePayButton: UIViewRepresentable {
+    /// The type of Apple Pay button to display
     let type: PKPaymentButtonType
+    
+    /// The visual style of the button
     let style: PKPaymentButtonStyle
+    
+    /// The action to perform when the button is tapped
     let action: () -> Void
     
     func makeUIView(context: Context) -> PKPaymentButton {

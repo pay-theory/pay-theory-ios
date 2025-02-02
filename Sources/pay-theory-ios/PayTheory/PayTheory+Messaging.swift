@@ -11,7 +11,7 @@ import Foundation
 import CryptoKit
 
 extension PayTheory {
-    private func parseResponse(response: String) -> Result<(type: String, body: [String: Any]), PTError> {
+    func parseResponse(response: String) -> Result<(type: String, body: [String: Any]), PTError> {
         // Attempt to convert the response string to a dictionary
         guard let dictionary = convertStringToDictionary(text: response) else {
             // If conversion fails, handle it as an error and exit
