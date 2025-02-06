@@ -269,8 +269,8 @@ public struct HostTokenResponse {
             self.creditServiceFeeModel = ServiceFeeModel(basisPoints: 0, fixed: 0, minFee: 0)
         }
         
-        self.currency = response["currency"] as? String ?? ""
-        self.country = response["country"] as? String ?? ""
+        self.currency = response["currency"] as? String ?? "USD"
+        self.country = response["country"] as? String ?? "US"
     }
 }
 
