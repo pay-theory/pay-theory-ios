@@ -42,34 +42,57 @@ enum NetworkError: Error {
     case serverError(statusCode: Int)
     case noData
     case decodingError
+    case noConnection
 }
 
 func makeRequest(request: URLRequest) async throws -> [String: AnyObject] {
     let config = URLSessionConfiguration.default
     config.allowsExpensiveNetworkAccess = false
     config.allowsConstrainedNetworkAccess = false
-    config.waitsForConnectivity = true
+    config.waitsForConnectivity = false
     config.requestCachePolicy = .reloadIgnoringLocalCacheData
+    config.timeoutIntervalForRequest = 5  // 5 second timeout for the actual connection
 
     let session = URLSession(configuration: config)
-
-    let (data, response) = try await session.data(for: request)
-
-    if let response = response as? HTTPURLResponse, !(200...299).contains(response.statusCode) {
-        throw NetworkError.serverError(statusCode: response.statusCode)
-    }
-
+    
     do {
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: AnyObject]
-        return json!
+        let (data, response) = try await session.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NetworkError.noConnection
+        }
+        
+        // Check for specific status codes that indicate no connectivity
+        if httpResponse.statusCode == -1009 || // No internet connection
+           httpResponse.statusCode == -1004 || // Could not connect to server
+           httpResponse.statusCode == -1005 {  // Network connection lost
+            throw NetworkError.noConnection
+        }
+        
+        if !(200...299).contains(httpResponse.statusCode) {
+            throw NetworkError.serverError(statusCode: httpResponse.statusCode)
+        }
+
+        if let json = try JSONSerialization.jsonObject(with: data) as? [String: AnyObject] {
+            return json
+        } else {
+            throw NetworkError.decodingError
+        }
+    } catch let error as URLError {
+        // Handle URLError cases that indicate connectivity issues
+        switch error.code {
+        case .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost:
+            throw NetworkError.noConnection
+        default:
+            throw NetworkError.transportError(error)
+        }
     } catch {
-        throw NetworkError.decodingError
+        throw error
     }
 }
 
 func getToken(apiKey: String, environment: String, stage: String, sessionKey: String) async throws -> [String: AnyObject] {
     guard let url = URL(string: "https://\(environment).\(stage).com/pt-token-service/") else {
-        debugPrint("Url for host token cannot be decided")
         throw ConnectionError.hostTokenCallFailed
     }
 
@@ -80,7 +103,8 @@ func getToken(apiKey: String, environment: String, stage: String, sessionKey: St
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     
     do {
-        return try await makeRequest(request: request)
+        let result = try await makeRequest(request: request)
+        return result
     } catch {
         throw ConnectionError.hostTokenCallFailed
     }

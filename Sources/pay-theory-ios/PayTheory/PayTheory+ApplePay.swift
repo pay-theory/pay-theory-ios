@@ -318,6 +318,11 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
             return
         }
         
+        guard let sheetConfig = sheetConfig else {
+            completion(PKPaymentAuthorizationResult(status: .failure, errors: nil))
+            return
+        }
+        
         Task {
             // SECTION 1: Extract Payment Data
             // Convert Apple Pay token data into required format
@@ -384,30 +389,25 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
                 fee: payTheory.cardServiceFee ?? 0,
                 feeMode: .merchantFee,
                 tokenDetails: tokenDetails,
-                hostToken: self.payTheory?.transaction.hostToken ?? ""
+                transaction_details: sheetConfig.transactionDetails
             )
             
-            // SECTION 6: Token Validation
-            // Check if host token is valid, refresh if needed
-            do {
-                if payTheory.hostTokenStillValid() == false {
-                    try await payTheory.ensureConnected()
-                    try await payTheory.fetchToken()
-                    try await payTheory.sendHostTokenMessage(calcFees: false)
-                }
-            } catch {
-                payTheory.handleConnectionError(error, sendToErrorHandler: true)
-            }
+//            // Need to print the stringified object of the paymentData so that I can see all the keys
+//            let plString = paymentData.base64EncodedString()
+//            // Base64 decode the string
+//            let decodedString = String(data: Data(base64Encoded: plString)!, encoding: .utf8)
+//            if let paayloadString = decodedString {
+//                print(paayloadString)
+//            }
             
-            // SECTION 7: Payment Processing
+            // SECTION 6: Payment Processing
             if let encryptedBody = payTheory.transaction.createApplePayBody(applePayData: payload) {
-                // SECTION 7A: Full Payment Processing Flow
+                // SECTION 6A: Full Payment Processing Flow
                 if let callback = payTheory.applePayHandler.sheetConfig?.onPaymentCompletion {
                     do {
                         // Ensure connection and process payment
                         try await payTheory.ensureConnected()
                         let response = try await payTheory.session.sendMessageAndWaitForResponse(messageBody: encryptedBody)
-                        print(response)
                         let applePayResponse = try payTheory.parseApplePayResponse(response)
                         callback(applePayResponse)
                         
@@ -423,7 +423,7 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
                         completion(PKPaymentAuthorizationResult(status: .failure, errors: []))
                     }
                 } 
-                // SECTION 7B: Tokenization-Only Flow
+                // SECTION 6B: Tokenization-Only Flow
                 else if let jsonData = encryptedBody.data(using: .utf8) {
                     // Convert encrypted body to base64 for tokenization
                     let base64EncodedString = jsonData.base64EncodedString()

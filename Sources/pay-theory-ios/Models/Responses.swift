@@ -174,6 +174,7 @@ public enum PTErrorCode: String {
     case notValid
     case socketError
     case tokenFailed
+    case noNetworkConnection
 }
 
 /// Represents an error in the PayTheory system.

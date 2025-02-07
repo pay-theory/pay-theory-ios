@@ -46,9 +46,7 @@ public struct PTForm<Content>: View where Content: View {
                     payTheory.handleActiveState()
                 case .background:
                     payTheory.handleBackgroundState()
-                case .inactive:
-                    break
-                @unknown default:
+                default:
                     break
                 }
             }

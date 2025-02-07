@@ -19,61 +19,85 @@ enum ConnectionError: Error {
 
 extension PayTheory {
     func handleActiveState() {
-        Task {
-            do {
-                _ = try await ensureConnected()
-            } catch {
-                var connectionError: ConnectionError = .socketConnectionFailed
-                if let error = error as? ConnectionError {
-                    connectionError = error
+        // Only attempt reconnection if we were previously connected and went to background
+        if session.status == .disconnected {
+            Task {
+                do {
+                    _ = try await ensureConnected()
+                } catch {
+                    var connectionError: ConnectionError = .socketConnectionFailed
+                    if let error = error as? ConnectionError {
+                        connectionError = error
+                    }
+                    _ = handleConnectionError(connectionError, sendToErrorHandler: true)
                 }
-                _ = handleConnectionError(connectionError, sendToErrorHandler: true)
             }
         }
     }
     
     // Closes the socket as the app goes behind the
     func handleBackgroundState() {
-        if session.status != .connected { return }
-        session.close()
+        if session.status == .connected {
+            session.close()
+        }
     }
     
     // Requests a Host Token and go through the App Attestation process if needed
     func fetchToken() async throws {
-        // Fetch token and set the ptToken variable from the response
-        let tokenData = try await getToken(apiKey: apiKey,
-                                           environment: environment,
-                                           stage: stage,
-                                           sessionKey: sessionId)
-        ptToken = tokenData["pt-token"] as? String ?? ""
-        if devMode {
-            // Skip attestation if it is in devMode for testing in the simulator
-            self.attestationString = ""
-        } else if attestationString == nil {
-            // Go through the attestation process to set the attestation string
-            if let challenge = tokenData["challengeOptions"]?["challenge"] as? String {
-                do {
-                    let key = try await service.generateKey()
-                    let encodedChallengeData = challenge.data(using: .utf8)!
-                    let hash = Data(SHA256.hash(data: encodedChallengeData))
-                    let attestation = try await service.attestKey(key, clientDataHash: hash)
-                    self.attestationString = attestation.base64EncodedString()
-                } catch {
+        do {
+            let tokenData = try await getToken(apiKey: apiKey,
+                                             environment: environment,
+                                             stage: stage,
+                                             sessionKey: sessionId)
+            ptToken = tokenData["pt-token"] as? String ?? ""
+            if devMode {
+                // Skip attestation if it is in devMode for testing in the simulator
+                self.attestationString = ""
+            } else if attestationString == nil {
+                // Go through the attestation process to set the attestation string
+                if let challenge = tokenData["challengeOptions"]?["challenge"] as? String {
+                    do {
+                        let key = try await service.generateKey()
+                        let encodedChallengeData = challenge.data(using: .utf8)!
+                        let hash = Data(SHA256.hash(data: encodedChallengeData))
+                        let attestation = try await service.attestKey(key, clientDataHash: hash)
+                        self.attestationString = attestation.base64EncodedString()
+                    } catch {
+                        if session.status == .connected {
+                            session.close()
+                        }
+                        throw ConnectionError.attestationFailed
+                    }
+                } else {
                     if session.status == .connected {
                         session.close()
                     }
-                    throw ConnectionError.attestationFailed
+                    throw ConnectionError.tokenFetchFailed
                 }
-            } else {
-                if session.status == .connected {
-                    session.close()
-                }
-                throw ConnectionError.tokenFetchFailed
             }
+        } catch {
+            throw ConnectionError.tokenFetchFailed
         }
     }
     
     func connectSocket() async throws  {
+        // Prevent multiple simultaneous connection attempts
+        guard !isConnecting else {
+            // Wait for existing connection attempt to complete
+            while isConnecting {
+                try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            }
+            // If connected after waiting, return
+            if session.status == .connected {
+                return
+            }
+            // If still not connected, continue with new connection attempt
+            return try await connectSocket()
+        }
+        
+        isConnecting = true
+        defer { isConnecting = false }
+        
         // Fetch the PT Token to pass into socket connection
         do {
             try await fetchToken()
@@ -82,17 +106,18 @@ extension PayTheory {
         } catch {
             throw ConnectionError.tokenFetchFailed
         }
+        
         // Open the websocket
         do {
             try await session.open(ptToken: ptToken!, environment: environment, stage: stage)
         } catch {
             throw ConnectionError.socketConnectionFailed
         }
+        
         //Send the host token message
         do {
             try await sendHostTokenMessage()
         } catch {
-            print("Error sending host token message: \(error)")
             throw error
         }
     }
@@ -120,28 +145,21 @@ extension PayTheory {
     /// Checks to see if the socket is connected
     /// Returns true if socket was already connected or false if it had to reconnect
     func ensureConnected() async throws -> Bool {
-        // Check if we're already connecting
-        guard !isConnecting else {
-            // Wait for any existing connection attempt to complete
-            while isConnecting {
-                try await Task.sleep(nanoseconds: 100_000_000) // 100ms
-            }
-            return session.status == .connected
-        }
-        
         // Check if the socket is already connected
         if session.status == .connected {
-            return true
+            // Verify host token is still valid
+            if hostTokenStillValid() {
+                return true
+            }
+            // If host token expired, close connection to force reconnect
+            session.close()
         }
         
         // If not connected, try to reconnect
-        isConnecting = true
         do {
             try await connectSocket()
-            isConnecting = false
             return false
         } catch {
-            isConnecting = false
             throw error
         }
     }

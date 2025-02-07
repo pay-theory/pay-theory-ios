@@ -105,7 +105,9 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
             // If there is a cardBin then try and send the amount message if the amount is sent
             if let cardBin = cardBin {
                 if let _ = amount {
-                    sendCalcFeeMessage(cardBin: cardBin)
+                    Task {
+                        await sendCalcFeeMessage(cardBin: cardBin)
+                    }
                 }
             } else { // If cardBin is set to nil then set the cardServiceFee to nil
                 self.cardServiceFee = nil
@@ -176,7 +178,6 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
         card = CardState(card: envCard, transaction: newTransaction)
         cash = CashState(cash: envCash, transaction: newTransaction)
         
-        
         // Initialize the WebSocketSession we will use for socket communications
         let provider = WebSocketProvider()
         session = WebSocketSession()
@@ -214,6 +215,15 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
                 self?.cardNumberChanged(number)
             }
             .store(in: &cancellables)
+            
+        // Initialize websocket connection
+        Task {
+            do {
+                _ = try await ensureConnected()
+            } catch {
+                _ = handleConnectionError(error)
+            }
+        }
     }
     
     deinit {
