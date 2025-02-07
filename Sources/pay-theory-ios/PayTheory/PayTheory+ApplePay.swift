@@ -300,7 +300,18 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
         
         self.sheetConfig?.requestConfiguration.paymentSummaryItems = paymentSummaryItems
     }
-    
+
+    // Finds the service fee in the paymentSummaryItems and returns the amount
+    // If no service fee is found, it returns 0
+    func getServiceFee(paymentSummaryItems: [PKPaymentSummaryItem]) -> Decimal {
+        let feeLabel = sheetConfig?.requestConfiguration.serviceFeeSummaryItemLabels.serviceFee
+        return paymentSummaryItems.first(where: { $0.label == feeLabel })?.amount as? Decimal ?? 0
+    }
+
+    // Converts a decimal amount to an Int to return the amount in pennies
+    func convertAmountToPennies(amount: Decimal) -> Int {
+        return NSDecimalNumber(decimal: amount * 100).intValue
+    }
     
     /// Handles the payment authorization process after user confirms payment with Apple Pay
     /// - Parameters:
@@ -334,12 +345,12 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
             // Extract billing contact details and create Address object
             let billingContact = payment.billingContact
             let billingAddress = Address(
-                line1: billingContact?.postalAddress?.street ?? "",
-                line2: billingContact?.postalAddress?.subLocality ?? "",
-                city: billingContact?.postalAddress?.city ?? "",
-                country: billingContact?.postalAddress?.country ?? "",
-                region: billingContact?.postalAddress?.state ?? "",
-                postalCode: billingContact?.postalAddress?.postalCode ?? ""
+                line1: billingContact?.postalAddress?.street,
+                line2: billingContact?.postalAddress?.subLocality,
+                city: billingContact?.postalAddress?.city,
+                country: billingContact?.postalAddress?.country,
+                region: billingContact?.postalAddress?.state,
+                postalCode: billingContact?.postalAddress?.postalCode
             )
             
             // Create Payor object with billing contact information
@@ -355,12 +366,12 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
             // Similar to billing, create Address and Payor objects for shipping
             let shippingContact = payment.shippingContact
             let shippingAddress = Address(
-                line1: shippingContact?.postalAddress?.street ?? "",
-                line2: shippingContact?.postalAddress?.subLocality ?? "",
-                city: shippingContact?.postalAddress?.city ?? "",
-                country: shippingContact?.postalAddress?.country ?? "",
-                region: shippingContact?.postalAddress?.state ?? "",
-                postalCode: shippingContact?.postalAddress?.postalCode ?? ""
+                line1: shippingContact?.postalAddress?.street,
+                line2: shippingContact?.postalAddress?.subLocality,
+                city: shippingContact?.postalAddress?.city,
+                country: shippingContact?.postalAddress?.country,
+                region: shippingContact?.postalAddress?.state,
+                postalCode: shippingContact?.postalAddress?.postalCode
             )
             let shippingPayor = Payor(
                 firstName: shippingContact?.name?.givenName,
@@ -384,21 +395,16 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
             
             // SECTION 5: Create Final Payment Payload
             // Combine all information into final payment structure
+            // Pull the amount and service fee from the paymentSummaryItems
+            let amount = sheetConfig.requestConfiguration.paymentSummaryItems.last?.amount as? Decimal ?? 0
+            let fee = getServiceFee(paymentSummaryItems: sheetConfig.requestConfiguration.paymentSummaryItems)
             let payload = ApplePayPaymentData(
-                amount: payTheory.amount ?? 0,
-                fee: payTheory.cardServiceFee ?? 0,
-                feeMode: .merchantFee,
+                amount: convertAmountToPennies(amount: amount),
+                fee: convertAmountToPennies(amount: fee),
+                feeMode: sheetConfig.transactionDetails.feeMode,
                 tokenDetails: tokenDetails,
                 transaction_details: sheetConfig.transactionDetails
             )
-            
-//            // Need to print the stringified object of the paymentData so that I can see all the keys
-//            let plString = paymentData.base64EncodedString()
-//            // Base64 decode the string
-//            let decodedString = String(data: Data(base64Encoded: plString)!, encoding: .utf8)
-//            if let paayloadString = decodedString {
-//                print(paayloadString)
-//            }
             
             // SECTION 6: Payment Processing
             if let encryptedBody = payTheory.transaction.createApplePayBody(applePayData: payload) {

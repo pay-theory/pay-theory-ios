@@ -71,4 +71,13 @@ public struct Payor: Codable {
         case email
         case personalAddress = "personal_address"
     }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(self.phone, forKey: .phone)
+        try container.encode(self.firstName, forKey: .firstName)
+        try container.encode(self.lastName, forKey: .lastName)
+        try container.encode(self.email, forKey: .email)
+        try container.encode(self.personalAddress, forKey: .personalAddress)
+    }
 }
