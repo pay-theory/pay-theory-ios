@@ -206,8 +206,8 @@ public struct ApplePayTokenDetails: Encodable {
     let paymentNetwork: String
     let cardDisplayName: String
     let cardType: String
-    let billingDetails: Payor
-    let shippingDetails: Payor
+    let billingDetails: Payor?
+    let shippingDetails: Payor?
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)

@@ -42,7 +42,30 @@ extension PayTheory {
         }
     }
     
-    // Requests a Host Token and go through the App Attestation process if needed
+    private func getOrCreateAttestationKey() async throws -> String {
+        let defaults = UserDefaults.standard
+        let keyKey = "pt_attestation_key"
+        
+        // Check if the attestation key is passed into the initalizer
+        if let attestationKey = self.attestationKey {
+            return attestationKey
+        }
+        
+        // Check if we have a saved key
+        if let savedKey = defaults.string(forKey: keyKey) {
+            print("Pulled cached key")
+            return savedKey
+        }
+        
+        // If no saved key, generate a new one
+        let newKey = try await service.generateKey()
+        
+        // Save the new key
+        defaults.set(newKey, forKey: keyKey)
+        
+        return newKey
+    }
+    
     func fetchToken() async throws {
         do {
             let tokenData = try await getToken(apiKey: apiKey,
@@ -57,7 +80,7 @@ extension PayTheory {
                 // Go through the attestation process to set the attestation string
                 if let challenge = tokenData["challengeOptions"]?["challenge"] as? String {
                     do {
-                        let key = try await service.generateKey()
+                        let key = try await getOrCreateAttestationKey()
                         let encodedChallengeData = challenge.data(using: .utf8)!
                         let hash = Data(SHA256.hash(data: encodedChallengeData))
                         let attestation = try await service.attestKey(key, clientDataHash: hash)

@@ -96,6 +96,7 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
     var session: WebSocketSession
     // Attestation string being set should trigger the connection of our socket or sending of the hostTokenMessage if it is already connected
     var attestationString: String?
+    var attestationKey: String?
     var applePayHandler: PayTheoryApplePayHandler
     var isConnecting = false
     
@@ -141,7 +142,7 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
     /// - Note: This initializer sets up various state variables and configures the instance
     ///         based on the provided API key. It also sets up Combine publishers to propagate
     ///         changes in the instance's state.
-    public init(amount: Int? = nil, apiKey: String, devMode: Bool = false,  errorHandler: @escaping (PTError) -> Void) {
+    public init(amount: Int? = nil, apiKey: String, devMode: Bool = false, attestationKey: String? = nil,  errorHandler: @escaping (PTError) -> Void) {
         // Parse the API key to extract environment and stage information
         var apiParts = apiKey.split {$0 == "-"}.map { String($0) }
         // Validate the the API key is the correct format
@@ -156,6 +157,7 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
         stage = apiParts[1]
         appleEnvironment = stage == "paytheory" ? "appattest" : "appattestdevelop"
         self.devMode = devMode
+        self.attestationKey = attestationKey
         
         // Store the completion handler
         self.errorHandler = errorHandler
@@ -241,8 +243,8 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
     
     func handleDisconnect() {
         DispatchQueue.main.async {
-            self.transaction.sessionKey = nil
-            self.transaction.publicKey = nil
+            self.transaction.hostToken = nil
+            self.hostTokenTimestamp = nil
         }
         setReady(false)
     }

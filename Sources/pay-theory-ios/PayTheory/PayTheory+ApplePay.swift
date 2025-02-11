@@ -329,10 +329,18 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
             return
         }
         
+        // Validate the Apple Pay sheet is configured
         guard let sheetConfig = sheetConfig else {
             completion(PKPaymentAuthorizationResult(status: .failure, errors: nil))
             return
         }
+        
+        // Validate that the session doesn't already have a succesfull payment
+        if payTheory.isInitialized || payTheory.isComplete {
+            completion(PKPaymentAuthorizationResult(status: .failure, errors: nil))
+            return
+        }
+        payTheory.isInitialized = true
         
         Task {
             // SECTION 1: Extract Payment Data
@@ -343,43 +351,47 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
             
             // SECTION 2: Process Billing Information
             // Extract billing contact details and create Address object
-            let billingContact = payment.billingContact
-            let billingAddress = Address(
-                line1: billingContact?.postalAddress?.street,
-                line2: billingContact?.postalAddress?.subLocality,
-                city: billingContact?.postalAddress?.city,
-                country: billingContact?.postalAddress?.country,
-                region: billingContact?.postalAddress?.state,
-                postalCode: billingContact?.postalAddress?.postalCode
-            )
-            
-            // Create Payor object with billing contact information
-            let billingPayor = Payor(
-                firstName: billingContact?.name?.givenName,
-                lastName: billingContact?.name?.familyName,
-                email: billingContact?.emailAddress,
-                phone: billingContact?.phoneNumber?.stringValue,
-                personalAddress: billingAddress
-            )
+            var billingPayor: Payor? = nil
+            if let billingContact = payment.billingContact {
+                let billingAddress = Address(
+                    line1: billingContact.postalAddress?.street,
+                    line2: billingContact.postalAddress?.subLocality,
+                    city: billingContact.postalAddress?.city,
+                    country: billingContact.postalAddress?.country,
+                    region: billingContact.postalAddress?.state,
+                    postalCode: billingContact.postalAddress?.postalCode
+                )
+                
+                // Create Payor object with billing contact information
+                billingPayor = Payor(
+                    firstName: billingContact.name?.givenName,
+                    lastName: billingContact.name?.familyName,
+                    email: billingContact.emailAddress,
+                    phone: billingContact.phoneNumber?.stringValue,
+                    personalAddress: billingAddress
+                )
+            }
 
             // SECTION 3: Process Shipping Information
             // Similar to billing, create Address and Payor objects for shipping
-            let shippingContact = payment.shippingContact
-            let shippingAddress = Address(
-                line1: shippingContact?.postalAddress?.street,
-                line2: shippingContact?.postalAddress?.subLocality,
-                city: shippingContact?.postalAddress?.city,
-                country: shippingContact?.postalAddress?.country,
-                region: shippingContact?.postalAddress?.state,
-                postalCode: shippingContact?.postalAddress?.postalCode
-            )
-            let shippingPayor = Payor(
-                firstName: shippingContact?.name?.givenName,
-                lastName: shippingContact?.name?.familyName,
-                email: shippingContact?.emailAddress,
-                phone: shippingContact?.phoneNumber?.stringValue,
-                personalAddress: shippingAddress
-            )
+            var shippingPayor: Payor? = nil
+            if let shippingContact = payment.shippingContact {
+                let shippingAddress = Address(
+                    line1: shippingContact.postalAddress?.street,
+                    line2: shippingContact.postalAddress?.subLocality,
+                    city: shippingContact.postalAddress?.city,
+                    country: shippingContact.postalAddress?.country,
+                    region: shippingContact.postalAddress?.state,
+                    postalCode: shippingContact.postalAddress?.postalCode
+                )
+                shippingPayor = Payor(
+                    firstName: shippingContact.name?.givenName,
+                    lastName: shippingContact.name?.familyName,
+                    email: shippingContact.emailAddress,
+                    phone: shippingContact.phoneNumber?.stringValue,
+                    personalAddress: shippingAddress
+                )
+            }
             
             // SECTION 4: Create Payment Token
             // Determine card type and create token details
@@ -420,13 +432,16 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
                         // Complete Apple Pay sheet based on response
                         if case .success(_) = applePayResponse {
                             completion(PKPaymentAuthorizationResult(status: .success, errors: []))
+                            payTheory.isComplete = true
                         } else {
                             completion(PKPaymentAuthorizationResult(status: .failure, errors: []))
+                            payTheory.isInitialized = false
                         }
                     } catch {
                         // Handle payment processing errors
                         payTheory.errorHandler(PTError(code: .applePayError, error: "Failed to process Apple Pay payment"))
                         completion(PKPaymentAuthorizationResult(status: .failure, errors: []))
+                        payTheory.isInitialized = false
                     }
                 } 
                 // SECTION 6B: Tokenization-Only Flow
@@ -439,13 +454,20 @@ class PayTheoryApplePayHandler: NSObject, PKPaymentAuthorizationControllerDelega
                             status: success ? .success : .failure,
                             errors: []
                         ))
+                        if success {
+                            payTheory.isComplete = false
+                        } else {
+                            payTheory.isInitialized = false
+                        }
                     } else {
                         payTheory.handleError(error: PTError.init(code: .applePayError, error: "No completion handler set to process Apple Pay payment"))
                         completion(PKPaymentAuthorizationResult(status: .failure, errors: []))
+                        payTheory.isInitialized = false
                     }
                 } else {
                     payTheory.handleError(error: PTError.init(code: .applePayError, error: "Error encrypting the Apple Pay payload for processing"))
                     completion(PKPaymentAuthorizationResult(status: .failure, errors: []))
+                    payTheory.isInitialized = false
                 }
             }
         }
