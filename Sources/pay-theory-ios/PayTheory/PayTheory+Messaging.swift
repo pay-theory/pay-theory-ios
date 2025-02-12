@@ -167,6 +167,9 @@ extension PayTheory {
             guard let encodedData = stringify(jsonDictionary: hostToken).data(using: .utf8) else {
                 throw ConnectionError.hostTokenCallFailed
             }
+            // Set the attestation string to nil so that we generate a new one before next host token call
+            self.attestationString = nil
+            
             message["encoded"] = encodedData.base64EncodedString()
             
             let response = try await session.sendMessageAndWaitForResponse(messageBody: stringify(jsonDictionary: message))

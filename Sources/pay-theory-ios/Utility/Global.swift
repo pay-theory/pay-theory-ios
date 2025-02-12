@@ -19,8 +19,12 @@ public enum PaymentType: String, CaseIterable, Identifiable {
     case card = "Card"
     case ach = "ACH"
     case cash = "Cash"
-    case applePay = "ApplePay"
     public var id: Self { self }
+}
+
+public enum AttestationEnvironment: String, Codable {
+    case local = "appattestdevelop"
+    case production = "appattest"
 }
 
 public enum HealthExpenseType: String, Encodable {

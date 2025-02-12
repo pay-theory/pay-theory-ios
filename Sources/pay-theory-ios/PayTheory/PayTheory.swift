@@ -129,7 +129,16 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
     ///   - apiKey: A string containing the API key for authentication with the Pay Theory service.
     ///             This should be in the format '{partner}-{paytheorystage}-{UUID}'.
     ///   - devMode: A boolean flag indicating whether to run in development mode. Defaults to `false`.
-    ///              When `true`, it uses the development environment for app attestation.
+    ///              When `true`, it skips the attestation process. Only available in sandbox.
+    ///   
+    ///   - attestationEnvironment: The environment to use for app attestation. Defaults to `.local`. 
+    ///                             If you are running from Xcode straight to a device, you should use `.local`. 
+    ///                             If you are running from TestFlight or App Store, you should use `.production`.
+    ///   
+    ///   - attestationKey: An optional string containing the attestation key for the App Attestation process. 
+    ///                     Can be used if you are managing your own attestation key. 
+    ///                     If not provided, the Pay Theory SDK will generate and manage its own key.
+    ///
     ///   - errorHandler: A closure that handles any errors that might occur during initialization
     ///                   and other background actions. It takes a `PTError` parameter.
     ///
@@ -142,7 +151,12 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
     /// - Note: This initializer sets up various state variables and configures the instance
     ///         based on the provided API key. It also sets up Combine publishers to propagate
     ///         changes in the instance's state.
-    public init(amount: Int? = nil, apiKey: String, devMode: Bool = false, attestationKey: String? = nil,  errorHandler: @escaping (PTError) -> Void) {
+    public init(amount: Int? = nil,
+                apiKey: String,
+                devMode: Bool = false,
+                attestationEnvironment: AttestationEnvironment = .local,
+                attestationKey: String? = nil,
+                errorHandler: @escaping (PTError) -> Void) {
         // Parse the API key to extract environment and stage information
         var apiParts = apiKey.split {$0 == "-"}.map { String($0) }
         // Validate the the API key is the correct format
@@ -155,7 +169,7 @@ public class PayTheory: ObservableObject, WebSocketProtocol {
         self.apiKey = apiKey
         environment = apiParts[0]
         stage = apiParts[1]
-        appleEnvironment = stage == "paytheory" ? "appattest" : "appattestdevelop"
+        appleEnvironment = attestationEnvironment.rawValue
         self.devMode = devMode
         self.attestationKey = attestationKey
         
