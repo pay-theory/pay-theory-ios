@@ -61,7 +61,7 @@ func makeRequest(request: URLRequest) async throws -> [String: AnyObject] {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NetworkError.noConnection
         }
-        
+                
         // Check for specific status codes that indicate no connectivity
         if httpResponse.statusCode == -1009 || // No internet connection
            httpResponse.statusCode == -1004 || // Could not connect to server

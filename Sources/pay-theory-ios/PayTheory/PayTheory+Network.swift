@@ -9,6 +9,7 @@
 
 import Foundation
 import CryptoKit
+import DeviceCheck
 
 enum ConnectionError: Error {
     case attestationFailed
@@ -16,6 +17,8 @@ enum ConnectionError: Error {
     case socketConnectionFailed
     case tokenFetchFailed
 }
+
+let keyKey = "pt_attestation_key"
 
 extension PayTheory {
     func handleActiveState() {
@@ -42,9 +45,10 @@ extension PayTheory {
         }
     }
     
+
+    
     private func getOrCreateAttestationKey() async throws -> String {
         let defaults = UserDefaults.standard
-        let keyKey = "pt_attestation_key"
         
         // Check if the attestation key is passed into the initalizer
         if let attestationKey = self.attestationKey {
@@ -53,7 +57,6 @@ extension PayTheory {
         
         // Check if we have a saved key
         if let savedKey = defaults.string(forKey: keyKey) {
-            print("Pulled cached key")
             return savedKey
         }
         
@@ -64,6 +67,11 @@ extension PayTheory {
         defaults.set(newKey, forKey: keyKey)
         
         return newKey
+    }
+    
+    private func wipeSavedKey() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: keyKey)
     }
     
     func fetchToken() async throws {
@@ -86,6 +94,17 @@ extension PayTheory {
                         let attestation = try await service.attestKey(key, clientDataHash: hash)
                         self.attestationString = attestation.base64EncodedString()
                     } catch {
+                        if let dcError = error as? DCError {
+                            switch dcError.code {
+                            case .invalidKey:
+                                // Issue with key generation
+                                // Wipe the key from memory so that it generates a new one next time
+                                wipeSavedKey()
+                                throw ConnectionError.attestationFailed
+                            default:
+                                throw ConnectionError.attestationFailed
+                            }
+                        }
                         if session.status == .connected {
                             session.close()
                         }
@@ -129,7 +148,6 @@ extension PayTheory {
         } catch {
             throw ConnectionError.tokenFetchFailed
         }
-        
         // Open the websocket
         do {
             try await session.open(ptToken: ptToken!, environment: environment, stage: stage)
