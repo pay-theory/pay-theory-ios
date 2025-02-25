@@ -51,7 +51,7 @@ func makeRequest(request: URLRequest) async throws -> [String: AnyObject] {
     config.allowsConstrainedNetworkAccess = false
     config.waitsForConnectivity = false
     config.requestCachePolicy = .reloadIgnoringLocalCacheData
-    config.timeoutIntervalForRequest = 5  // 5 second timeout for the actual connection
+    config.timeoutIntervalForRequest = 30  // 30 second timeout for the actual connection
 
     let session = URLSession(configuration: config)
     
