@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-/// This is used to wrap an ancestor view to allow the TextFields and Buttons to access the data needed.
+/// This is used to wrap an ancestor view to allow the TextFields to access the data needed.
 ///
 /// - Requires: Needs to have the PayTheory Object that was initialized with the API Key passed as an EnvironmentObject
 ///
@@ -24,17 +24,31 @@ public struct PTForm<Content>: View where Content: View {
 
     let content: () -> Content
     @EnvironmentObject var payTheory: PayTheory
+    @Environment(\.scenePhase) var scenePhase
+    
+
 
     public init(@ViewBuilder content: @escaping () -> Content) {
         self.content = content
     }
 
     public var body: some View {
-        Group {
-            content()
-        }.environmentObject(payTheory.envCard)
-        .environmentObject(payTheory.envPayor)
-        .environmentObject(payTheory.envAch)
-        .environmentObject(payTheory.envCash)
-    }
+            Group {
+                content()
+            }
+            .environmentObject(payTheory.envCard)
+            .environmentObject(payTheory.envAch)
+            .environmentObject(payTheory.envCash)
+        
+            .onChange(of: scenePhase) { newPhase in
+                switch newPhase {
+                case .active:
+                    payTheory.handleActiveState()
+                case .background:
+                    payTheory.handleBackgroundState()
+                default:
+                    break
+                }
+            }
+        }
 }

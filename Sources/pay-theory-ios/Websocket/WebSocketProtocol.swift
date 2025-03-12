@@ -17,11 +17,6 @@ protocol WebSocketProtocol {
     func receiveMessage(message:String)
     
     /**
-     request host token
-     */
-    func handleConnect()
-    
-    /**
      react to an error
      */
     func handleError(error:Error)
